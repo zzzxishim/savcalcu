@@ -85,7 +85,7 @@ export default function App() {
       time: now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }),
     };
 
-    try {
+try {
       // Save to backend
       await salesAPI.create(tx);
       
@@ -94,6 +94,9 @@ export default function App() {
         const ci = cartItems.find(i => i.id === p.id);
         return ci ? { ...p, stock: Math.max(0, p.stock - ci.qty) } : p;
       }));
+      
+      // Update local sales state so new sales show immediately on reports/dashboard
+      setSales(prev => [...prev, tx]);
       
       setCustNo(n => n + 1);
       settingsAPI.set('custNo', customerId + 1);

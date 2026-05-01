@@ -1,149 +1,158 @@
 import express from 'express';
 import cors from 'cors';
-import initSqlJs from 'sql.js';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import fs from 'fs';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { Pool } from 'pg';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const DB_PATH = join(__dirname, 'savcalcu.db');
 
-// Middleware
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error('DATABASE_URL is required');
+}
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false,
+  },
+});
+
 app.use(cors());
 app.use(express.json());
 
-let db;
-
-// Initialize database
 async function initDatabase() {
-  const SQL = await initSqlJs();
-  
-  // Load existing database or create new one
-  if (fs.existsSync(DB_PATH)) {
-    const buffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
-  
-  // Create tables
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       unit TEXT,
       price REAL DEFAULT 0,
       stock REAL DEFAULT 0,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  
-  db.run(`
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sales (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      items TEXT NOT NULL,
+      id SERIAL PRIMARY KEY,
+      items JSONB NOT NULL,
       total REAL NOT NULL,
       cash REAL NOT NULL,
       change REAL NOT NULL,
-      dateISO TEXT NOT NULL,
+      "dateISO" TEXT NOT NULL,
       date TEXT NOT NULL,
       time TEXT NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  
-  db.run(`
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS expenses (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       category TEXT NOT NULL,
       description TEXT NOT NULL,
       amount REAL NOT NULL,
-      dateISO TEXT NOT NULL,
+      "dateISO" TEXT NOT NULL,
       date TEXT NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  
-  db.run(`
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     )
   `);
-  
-  // Insert default settings if not exist
-  try {
-    db.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['custNo', '1']);
-  } catch (e) {}
-  
-  saveDatabase();
+
+  await pool.query(
+    `
+      INSERT INTO settings (key, value)
+      VALUES ($1, $2)
+      ON CONFLICT (key) DO NOTHING
+    `,
+    ['custNo', '1']
+  );
+
+  await pool.query('SELECT 1');
   console.log('Database initialized successfully!');
 }
 
-// Save database to file
-function saveDatabase() {
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
-}
-
-// Initialize and start server
 await initDatabase();
 
 // ==================== PRODUCTS API ====================
 
-// Get all products
-app.get('/api/products', (req, res) => {
+app.get('/api/products', async (req, res) => {
   try {
-    const results = db.exec('SELECT * FROM products ORDER BY name');
-    const products = results.length > 0 ? results[0].values.map(row => ({
-      id: row[0], name: row[1], unit: row[2], price: row[3], stock: row[4]
-    })) : [];
+    const { rows } = await pool.query('SELECT * FROM products ORDER BY name');
+    const products = rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      unit: row.unit,
+      price: row.price,
+      stock: row.stock,
+    }));
     res.json(products);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Add product
-app.post('/api/products', (req, res) => {
+app.post('/api/products', async (req, res) => {
   try {
     const { name, unit, price, stock } = req.body;
-    db.run('INSERT INTO products (name, unit, price, stock) VALUES (?, ?, ?, ?)', [name, unit, price || 0, stock || 0]);
-    const result = db.exec('SELECT last_insert_rowid()');
-    const id = result[0].values[0][0];
-    saveDatabase();
-    res.json({ id, name, unit, price, stock });
+    const {
+      rows: [product],
+    } = await pool.query(
+      `
+        INSERT INTO products (name, unit, price, stock)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+      `,
+      [name, unit, price || 0, stock || 0]
+    );
+
+    res.json({
+      id: product.id,
+      name,
+      unit,
+      price: price || 0,
+      stock: stock || 0,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Update product
-app.put('/api/products/:id', (req, res) => {
+app.put('/api/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, unit, price, stock } = req.body;
-    db.run('UPDATE products SET name = ?, unit = ?, price = ?, stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
-      [name, unit, price, stock, id]);
-    saveDatabase();
+
+    await pool.query(
+      `
+        UPDATE products
+        SET name = $1,
+            unit = $2,
+            price = $3,
+            stock = $4,
+            updated_at = NOW()
+        WHERE id = $5
+      `,
+      [name, unit, price, stock, id]
+    );
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Delete product
-app.delete('/api/products/:id', (req, res) => {
+app.delete('/api/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    db.run('DELETE FROM products WHERE id = ?', [id]);
-    saveDatabase();
+    await pool.query('DELETE FROM products WHERE id = $1', [id]);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -152,76 +161,106 @@ app.delete('/api/products/:id', (req, res) => {
 
 // ==================== SALES API ====================
 
-// Get all sales
-app.get('/api/sales', (req, res) => {
+app.get('/api/sales', async (req, res) => {
   try {
-    const results = db.exec('SELECT * FROM sales ORDER BY id DESC');
-    const sales = results.length > 0 ? results[0].values.map(row => ({
-      id: row[0], items: JSON.parse(row[1]), total: row[2], cash: row[3], change: row[4], dateISO: row[5], date: row[6], time: row[7]
-    })) : [];
+    const { rows } = await pool.query('SELECT * FROM sales ORDER BY id DESC');
+    const sales = rows.map((row) => ({
+      id: row.id,
+      items: typeof row.items === 'string' ? JSON.parse(row.items) : row.items,
+      total: row.total,
+      cash: row.cash,
+      change: row.change,
+      dateISO: row.dateISO,
+      date: row.date,
+      time: row.time,
+    }));
     res.json(sales);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Add sale
-app.post('/api/sales', (req, res) => {
+app.post('/api/sales', async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const { items, total, cash, change, dateISO, date, time } = req.body;
-    db.run('INSERT INTO sales (items, total, cash, change, dateISO, date, time) VALUES (?, ?, ?, ?, ?, ?, ?)', 
-      [JSON.stringify(items), total, cash, change, dateISO, date, time]);
-    const result = db.exec('SELECT last_insert_rowid()');
-    const id = result[0].values[0][0];
-    
-    // Update product stock
-    items.forEach(item => {
-      db.run('UPDATE products SET stock = stock - ? WHERE id = ?', [item.qty, item.id]);
-    });
-    
-    saveDatabase();
-    res.json({ id });
+
+    await client.query('BEGIN');
+
+    const {
+      rows: [sale],
+    } = await client.query(
+      `
+        INSERT INTO sales (items, total, cash, change, "dateISO", date, time)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+      `,
+      [JSON.stringify(items), total, cash, change, dateISO, date, time]
+    );
+
+    for (const item of items) {
+      await client.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [
+        item.qty,
+        item.id,
+      ]);
+    }
+
+    await client.query('COMMIT');
+
+    res.json({ id: sale.id });
   } catch (error) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 });
 
 // ==================== EXPENSES API ====================
 
-// Get all expenses
-app.get('/api/expenses', (req, res) => {
+app.get('/api/expenses', async (req, res) => {
   try {
-    const results = db.exec('SELECT * FROM expenses ORDER BY id DESC');
-    const expenses = results.length > 0 ? results[0].values.map(row => ({
-      id: row[0], category: row[1], description: row[2], amount: row[3], dateISO: row[4], date: row[5]
-    })) : [];
+    const { rows } = await pool.query('SELECT * FROM expenses ORDER BY id DESC');
+    const expenses = rows.map((row) => ({
+      id: row.id,
+      category: row.category,
+      description: row.description,
+      amount: row.amount,
+      dateISO: row.dateISO,
+      date: row.date,
+    }));
     res.json(expenses);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Add expense
-app.post('/api/expenses', (req, res) => {
+app.post('/api/expenses', async (req, res) => {
   try {
     const { category, description, amount, dateISO, date } = req.body;
-    db.run('INSERT INTO expenses (category, description, amount, dateISO, date) VALUES (?, ?, ?, ?, ?)', 
-      [category, description, amount, dateISO, date]);
-    const result = db.exec('SELECT last_insert_rowid()');
-    const id = result[0].values[0][0];
-    saveDatabase();
-    res.json({ id });
+
+    const {
+      rows: [expense],
+    } = await pool.query(
+      `
+        INSERT INTO expenses (category, description, amount, "dateISO", date)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+      `,
+      [category, description, amount, dateISO, date]
+    );
+
+    res.json({ id: expense.id });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Delete expense
-app.delete('/api/expenses/:id', (req, res) => {
+app.delete('/api/expenses/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    db.run('DELETE FROM expenses WHERE id = ?', [id]);
-    saveDatabase();
+    await pool.query('DELETE FROM expenses WHERE id = $1', [id]);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -230,31 +269,34 @@ app.delete('/api/expenses/:id', (req, res) => {
 
 // ==================== SETTINGS API ====================
 
-// Get setting
-app.get('/api/settings/:key', (req, res) => {
+app.get('/api/settings/:key', async (req, res) => {
   try {
     const { key } = req.params;
-    const results = db.exec('SELECT value FROM settings WHERE key = ?', [key]);
-    const value = results.length > 0 && results[0].values.length > 0 ? results[0].values[0][0] : null;
+    const { rows } = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
+    const value = rows.length > 0 ? rows[0].value : null;
     res.json({ value });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Set setting
-app.post('/api/settings', (req, res) => {
+app.post('/api/settings', async (req, res) => {
   try {
     const { key, value } = req.body;
-    db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, String(value)]);
-    saveDatabase();
+    await pool.query(
+      `
+        INSERT INTO settings (key, value)
+        VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+      `,
+      [key, String(value)]
+    );
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Start server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
