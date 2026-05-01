@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+
+# Database (keep for deployment, remove for local only)
+# server/savcalcu.db
+
+# IDE
+.vscode/
+.idea/
+.vercel
