@@ -17,7 +17,10 @@ const pool = new Pool({
   },
 });
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'https://your-vercel-domain.vercel.app', // Replace with your actual Vercel domain
+  credentials: true,
+}));
 app.use(express.json());
 
 async function initDatabase() {
@@ -153,6 +156,18 @@ app.delete('/api/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM products WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update product stock
+app.patch('/api/products/:id/stock', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stock } = req.body;
+    await pool.query('UPDATE products SET stock = $1 WHERE id = $2', [stock, id]);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
