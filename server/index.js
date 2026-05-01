@@ -4,26 +4,43 @@ import { Pool } from 'pg';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
-  throw new Error('DATABASE_URL is required');
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://savcalcu.vercel.app';
+
+let pool = null;
+
+if (DATABASE_URL) {
+  pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: {
+      rejectUnauthorized: false,
+    },
+  });
+} else {
+  console.error('DATABASE_URL is not set. Database operations will fail until this environment variable is provided.');
 }
 
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
-});
-
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://your-vercel-domain.vercel.app', // Replace with your actual Vercel domain
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: FRONTEND_URL,
+    credentials: true,
+  })
+);
 app.use(express.json());
 
+function ensureDatabase(res) {
+  if (!pool) {
+    res.status(500).json({ error: 'Database is not configured. Set DATABASE_URL in your environment.' });
+    return false;
+  }
+  return true;
+}
+
 async function initDatabase() {
+  if (!pool) {
+    return;
+  }
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
       id SERIAL PRIMARY KEY,
@@ -78,15 +95,18 @@ async function initDatabase() {
     ['custNo', '1']
   );
 
-  await pool.query('SELECT 1');
   console.log('Database initialized successfully!');
 }
 
-await initDatabase();
+if (pool) {
+  await initDatabase();
+}
 
 // ==================== PRODUCTS API ====================
 
 app.get('/api/products', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { rows } = await pool.query('SELECT * FROM products ORDER BY name');
     const products = rows.map((row) => ({
@@ -103,6 +123,8 @@ app.get('/api/products', async (req, res) => {
 });
 
 app.post('/api/products', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { name, unit, price, stock } = req.body;
     const {
@@ -129,6 +151,8 @@ app.post('/api/products', async (req, res) => {
 });
 
 app.put('/api/products/:id', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { id } = req.params;
     const { name, unit, price, stock } = req.body;
@@ -153,6 +177,8 @@ app.put('/api/products/:id', async (req, res) => {
 });
 
 app.delete('/api/products/:id', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM products WHERE id = $1', [id]);
@@ -164,6 +190,8 @@ app.delete('/api/products/:id', async (req, res) => {
 
 // Update product stock
 app.patch('/api/products/:id/stock', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { id } = req.params;
     const { stock } = req.body;
@@ -177,6 +205,8 @@ app.patch('/api/products/:id/stock', async (req, res) => {
 // ==================== SALES API ====================
 
 app.get('/api/sales', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { rows } = await pool.query('SELECT * FROM sales ORDER BY id DESC');
     const sales = rows.map((row) => ({
@@ -196,6 +226,8 @@ app.get('/api/sales', async (req, res) => {
 });
 
 app.post('/api/sales', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   const client = await pool.connect();
 
   try {
@@ -235,6 +267,8 @@ app.post('/api/sales', async (req, res) => {
 // ==================== EXPENSES API ====================
 
 app.get('/api/expenses', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { rows } = await pool.query('SELECT * FROM expenses ORDER BY id DESC');
     const expenses = rows.map((row) => ({
@@ -252,6 +286,8 @@ app.get('/api/expenses', async (req, res) => {
 });
 
 app.post('/api/expenses', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { category, description, amount, dateISO, date } = req.body;
 
@@ -273,6 +309,8 @@ app.post('/api/expenses', async (req, res) => {
 });
 
 app.delete('/api/expenses/:id', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM expenses WHERE id = $1', [id]);
@@ -285,6 +323,8 @@ app.delete('/api/expenses/:id', async (req, res) => {
 // ==================== SETTINGS API ====================
 
 app.get('/api/settings/:key', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { key } = req.params;
     const { rows } = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
@@ -296,6 +336,8 @@ app.get('/api/settings/:key', async (req, res) => {
 });
 
 app.post('/api/settings', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
   try {
     const { key, value } = req.body;
     await pool.query(
