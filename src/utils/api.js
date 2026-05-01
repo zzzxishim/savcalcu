@@ -1,10 +1,12 @@
 // API utility for communicating with backend (production: Render backend)
 
-const API_URL = "https://savcalcu-1.onrender.com/api";
+const API_URL = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : "https://savcalcu-1.onrender.com/api";
 
-// Generic fetch wrapper
+// Generic fetch wrapper with retry for Render cold-start
 async function fetchAPI(endpoint, options = {}) {
-  try {
+  const attemptFetch = async () => {
     const response = await fetch(`${API_URL}${endpoint}`, {
       headers: {
         'Content-Type': 'application/json',
@@ -16,9 +18,20 @@ async function fetchAPI(endpoint, options = {}) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     return await response.json();
+  };
+
+  try {
+    return await attemptFetch();
   } catch (error) {
-    console.error(`API Error [${endpoint}]:`, error);
-    throw error;
+    console.warn(`API Error [${endpoint}]: ${error.message}. Retrying in 3 seconds for Render cold-start...`);
+    // Wait 3 seconds and retry once
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    try {
+      return await attemptFetch();
+    } catch (retryError) {
+      console.error(`API Error [${endpoint}] (after retry):`, retryError);
+      throw retryError;
+    }
   }
 }
 
