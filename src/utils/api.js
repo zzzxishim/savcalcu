@@ -1,8 +1,6 @@
 // API utility for communicating with backend (production: Render backend)
 
-const API_URL = import.meta.env.VITE_API_URL
-  ? `${import.meta.env.VITE_API_URL}/api`
-  : "https://savcalcu-1.onrender.com/api";
+const API_URL = "https://savcalcu-1.onrender.com/api";
 
 // Generic fetch wrapper with retry for Render cold-start
 async function fetchAPI(endpoint, options = {}) {
