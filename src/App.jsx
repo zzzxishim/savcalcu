@@ -188,7 +188,7 @@ export default function App() {
       }}>
         <div>
           <div style={{ color: C.accent, fontWeight: 900, fontSize: 22, letterSpacing: -0.5 }}>SavCalcu</div>
-          <div style={{ color: C.dim, fontSize: 11, fontWeight: 600 }}>Family Store POS</div>
+          <div style={{ color: C.dim, fontSize: 11, fontWeight: 600 }}>Family Borela</div>
         </div>
         <div style={{ textAlign: 'right' }}>
           {tab === 'pos' && <div style={{ color: C.muted, fontSize: 13, fontWeight: 700 }}>Customer <span style={{ color: C.accent }}>#{custNo}</span></div>}
