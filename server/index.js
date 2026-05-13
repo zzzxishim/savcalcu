@@ -5,7 +5,14 @@ import { Pool } from 'pg';
 const app = express();
 const PORT = process.env.PORT || 5000;
 const DATABASE_URL = process.env.DATABASE_URL;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://savcalcu.vercel.app';
+const allowedOrigins = (
+  process.env.CORS_ORIGIN ||
+  process.env.FRONTEND_URL ||
+  'https://savcalcu.vercel.app'
+)
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 let pool = null;
 
@@ -22,7 +29,7 @@ if (DATABASE_URL) {
 
 app.use(
   cors({
-    origin: FRONTEND_URL,
+    origin: allowedOrigins,
     credentials: true,
   })
 );
@@ -101,6 +108,10 @@ async function initDatabase() {
 if (pool) {
   await initDatabase();
 }
+
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, databaseConfigured: Boolean(pool) });
+});
 
 // ==================== PRODUCTS API ====================
 
@@ -188,7 +199,6 @@ app.delete('/api/products/:id', async (req, res) => {
   }
 });
 
-// Update product stock
 app.patch('/api/products/:id/stock', async (req, res) => {
   if (!ensureDatabase(res)) return;
 

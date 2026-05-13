@@ -6,7 +6,8 @@ dist/
 .env.local
 
 # Database (keep for deployment, remove for local only)
-# server/savcalcu.db
+server/savcalcu.db
+*.msi
 
 # IDE
 .vscode/
