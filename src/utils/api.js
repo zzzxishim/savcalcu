@@ -135,4 +135,14 @@ export const settingsAPI = {
     }),
 };
 
-export default { productsAPI, salesAPI, expensesAPI, settingsAPI };
+// Backup API
+export const backupAPI = {
+  export: () => fetchAPI('/backup'),
+  restore: (backup) =>
+    fetchAPI('/backup/restore', {
+      method: 'POST',
+      body: JSON.stringify(backup),
+    }),
+};
+
+export default { productsAPI, salesAPI, expensesAPI, settingsAPI, backupAPI };

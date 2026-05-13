@@ -52,7 +52,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 function ensureDatabase(res) {
   if (!pool) {
@@ -130,6 +130,142 @@ if (pool) {
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, databaseConfigured: Boolean(pool) });
+});
+
+// ==================== BACKUP API ====================
+
+app.get('/api/backup', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
+  try {
+    const [products, sales, expenses, settings] = await Promise.all([
+      pool.query('SELECT id, name, unit, price, stock FROM products ORDER BY id'),
+      pool.query('SELECT id, items, total, cash, change, "dateISO", date, time FROM sales ORDER BY id'),
+      pool.query('SELECT id, category, description, amount, "dateISO", date FROM expenses ORDER BY id'),
+      pool.query('SELECT key, value FROM settings ORDER BY key'),
+    ]);
+
+    res.json({
+      app: 'SavCalcu',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      data: {
+        products: products.rows,
+        sales: sales.rows,
+        expenses: expenses.rows,
+        settings: Object.fromEntries(settings.rows.map((row) => [row.key, row.value])),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/backup/restore', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
+  const backup = req.body;
+  const data = backup?.data || backup;
+
+  if (!data || !Array.isArray(data.products) || !Array.isArray(data.sales) || !Array.isArray(data.expenses)) {
+    res.status(400).json({ error: 'Invalid SavCalcu backup file.' });
+    return;
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    await client.query('DELETE FROM sales');
+    await client.query('DELETE FROM expenses');
+    await client.query('DELETE FROM products');
+    await client.query('DELETE FROM settings');
+
+    for (const product of data.products) {
+      await client.query(
+        `
+          INSERT INTO products (id, name, unit, price, stock)
+          VALUES ($1, $2, $3, $4, $5)
+        `,
+        [
+          product.id,
+          product.name || '',
+          product.unit || '',
+          Number(product.price) || 0,
+          Number(product.stock) || 0,
+        ]
+      );
+    }
+
+    for (const sale of data.sales) {
+      await client.query(
+        `
+          INSERT INTO sales (id, items, total, cash, change, "dateISO", date, time)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `,
+        [
+          sale.id,
+          JSON.stringify(sale.items || []),
+          Number(sale.total) || 0,
+          Number(sale.cash) || 0,
+          Number(sale.change) || 0,
+          sale.dateISO || new Date().toISOString(),
+          sale.date || '',
+          sale.time || '',
+        ]
+      );
+    }
+
+    for (const expense of data.expenses) {
+      await client.query(
+        `
+          INSERT INTO expenses (id, category, description, amount, "dateISO", date)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `,
+        [
+          expense.id,
+          expense.category || 'Other',
+          expense.description || '',
+          Number(expense.amount) || 0,
+          expense.dateISO || new Date().toISOString(),
+          expense.date || '',
+        ]
+      );
+    }
+
+    const settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
+    const settingEntries = Object.entries({ custNo: '1', ...settings });
+    for (const [key, value] of settingEntries) {
+      await client.query(
+        `
+          INSERT INTO settings (key, value)
+          VALUES ($1, $2)
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        `,
+        [key, String(value)]
+      );
+    }
+
+    await client.query(`SELECT setval(pg_get_serial_sequence('products', 'id'), COALESCE((SELECT MAX(id) FROM products), 1), (SELECT COUNT(*) > 0 FROM products))`);
+    await client.query(`SELECT setval(pg_get_serial_sequence('sales', 'id'), COALESCE((SELECT MAX(id) FROM sales), 1), (SELECT COUNT(*) > 0 FROM sales))`);
+    await client.query(`SELECT setval(pg_get_serial_sequence('expenses', 'id'), COALESCE((SELECT MAX(id) FROM expenses), 1), (SELECT COUNT(*) > 0 FROM expenses))`);
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      counts: {
+        products: data.products.length,
+        sales: data.sales.length,
+        expenses: data.expenses.length,
+      },
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
 });
 
 // ==================== PRODUCTS API ====================

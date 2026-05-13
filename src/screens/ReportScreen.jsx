@@ -1,13 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { C, fmtK, PERIODS, CAT_ICON } from '../utils/constants';
 import { filterByPeriod } from '../utils/helpers';
 import { Btn, SearchBar, Field } from '../components/UI';
 import Ic from '../components/Icons';
+import { backupAPI } from '../utils/api';
 
 const ReportScreen = ({ sales, expenses }) => {
   const [period, setPeriod] = useState('today');
   const [customDate, setCustomDate] = useState('');
+  const backupFileRef = useRef(null);
 
   const filtSales = useMemo(() => filterByPeriod(sales, period, customDate), [sales, period, customDate]);
   const filtExpRep = useMemo(() => filterByPeriod(expenses, period, customDate), [expenses, period, customDate]);
@@ -52,6 +54,46 @@ const ReportScreen = ({ sales, expenses }) => {
     ]), 'Expenses');
 
     XLSX.writeFile(wb, `SavCalcu_${label}_${Date.now()}.xlsx`);
+  };
+
+  const exportBackup = async () => {
+    try {
+      const backup = await backupAPI.export();
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `savcalcu-backup-${stamp}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exporting backup:', err);
+      alert('Backup export failed. Please check your connection.');
+    }
+  };
+
+  const restoreBackup = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const ok = confirm('Restore this backup? This will replace current products, sales, expenses, and settings.');
+    if (!ok) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const backup = JSON.parse(evt.target.result);
+        await backupAPI.restore(backup);
+        alert('Backup restored. The app will reload now.');
+        window.location.reload();
+      } catch (err) {
+        console.error('Error restoring backup:', err);
+        alert('Backup restore failed. Please make sure this is a valid SavCalcu backup file.');
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -112,6 +154,23 @@ const ReportScreen = ({ sales, expenses }) => {
       <Btn onClick={exportExcel} bg={C.green} fg="#020f08" style={{ width: '100%', marginBottom: 16 }}>
         <Ic n="download" size={16} color="#020f08" /> Export to Excel
       </Btn>
+
+      {/* Backup Tools */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+        <Btn onClick={exportBackup} bg={C.blue} fg="#020e1c" sm>
+          <Ic n="download" size={14} color="#020e1c" /> Backup
+        </Btn>
+        <Btn onClick={() => backupFileRef.current?.click()} bg={C.accent} fg="#080e1c" sm>
+          <Ic n="upload" size={14} color="#080e1c" /> Restore
+        </Btn>
+        <input
+          ref={backupFileRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          onChange={restoreBackup}
+        />
+      </div>
 
       {/* Sales Transactions */}
       <div style={{ color: C.text, fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Transactions ({filtSales.length})</div>
