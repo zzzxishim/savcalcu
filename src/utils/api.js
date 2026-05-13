@@ -1,9 +1,13 @@
 // API utility for communicating with backend
 
 const DEFAULT_PRODUCTION_API_URL = 'https://savcalcu-1.onrender.com/api';
+const configuredApiUrl = import.meta.env.VITE_API_URL;
 const API_URL = (
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.DEV ? '/api' : DEFAULT_PRODUCTION_API_URL)
+  !configuredApiUrl || configuredApiUrl.includes('your-render-service')
+    ? import.meta.env.DEV
+      ? '/api'
+      : DEFAULT_PRODUCTION_API_URL
+    : configuredApiUrl
 ).replace(/\/$/, '');
 
 const getLocalData = (key) => {
