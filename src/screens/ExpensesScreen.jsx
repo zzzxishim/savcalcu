@@ -3,6 +3,7 @@ import { C, fmtK, EXP_CATS, CAT_COLOR, CAT_ICON } from '../utils/constants';
 import { isSameDay } from '../utils/helpers';
 import { Btn, SearchBar, Field, Modal, StatCard } from '../components/UI';
 import Ic from '../components/Icons';
+import { expensesAPI } from '../utils/api';
 
 const ExpensesScreen = ({ expenses, setExpenses }) => {
   const [expQ, setExpQ] = useState('');
@@ -24,19 +25,39 @@ const ExpensesScreen = ({ expenses, setExpenses }) => {
     [expenses, expQ]
   );
 
-  const saveExp = () => {
+  const saveExp = async () => {
     if (!newExp.description || !newExp.amount) return;
     const now = new Date();
-    setExpenses(prev => [{
-      id: Date.now(),
+
+    const expense = {
       category: newExp.category,
       description: newExp.description,
       amount: parseFloat(newExp.amount) || 0,
       dateISO: now.toISOString(),
       date: now.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
-    }, ...prev]);
+    };
+
+    try {
+      const savedExpense = await expensesAPI.create(expense);
+      setExpenses(prev => [{ ...expense, id: savedExpense.id }, ...prev]);
+    } catch (err) {
+      console.error('Error saving expense:', err);
+      alert('Expense save failed. Please check your connection.');
+      return;
+    }
+
     setNewExp({ category: 'Restocking', description: '', amount: '' });
     setShowAddExp(false);
+  };
+
+  const deleteExpense = async (id) => {
+    try {
+      await expensesAPI.delete(id);
+      setExpenses(prev => prev.filter(x => x.id !== id));
+    } catch (err) {
+      console.error('Error deleting expense:', err);
+      alert('Expense delete failed. Please check your connection.');
+    }
   };
 
   return (
@@ -104,7 +125,7 @@ const ExpensesScreen = ({ expenses, setExpenses }) => {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
             <div style={{ color: C.red, fontWeight: 900, fontSize: 16 }}>₱{e.amount.toFixed(2)}</div>
-            <button onClick={() => setExpenses(prev => prev.filter(x => x.id !== e.id))} style={{
+            <button onClick={() => deleteExpense(e.id)} style={{
               background: C.redSoft, border: 'none', borderRadius: 7, padding: '4px 7px', cursor: 'pointer'
             }}>
               <Ic n="trash" size={12} color={C.red} />
