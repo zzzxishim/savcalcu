@@ -12,7 +12,14 @@ import ExpensesScreen from './screens/ExpensesScreen';
 import ReportScreen from './screens/ReportScreen';
 
 export default function App() {
-  const [tab, setTab] = useState('home');
+  const [tab, setTab] = useState(() => {
+    try {
+      const savedTab = localStorage.getItem('savcalcu_active_tab');
+      return TABS.some(t => t.id === savedTab) ? savedTab : 'home';
+    } catch {
+      return 'home';
+    }
+  });
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -32,6 +39,12 @@ export default function App() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('savcalcu_active_tab', tab);
+    } catch {}
+  }, [tab]);
 
   const loadData = async () => {
     try {
@@ -85,7 +98,7 @@ export default function App() {
       time: now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }),
     };
 
-try {
+    try {
       // Save to backend
       await salesAPI.create(tx);
       
