@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { C, fmt, LOW, EXP_CATS } from '../utils/constants';
 import { Btn, SearchBar, Field, Modal } from '../components/UI';
 import Ic from '../components/Icons';
+import { productsAPI } from '../utils/api';
 
 const ProductsScreen = ({ products, setProducts }) => {
   const [prodQ, setProdQ] = useState('');
@@ -21,53 +22,101 @@ const ProductsScreen = ({ products, setProducts }) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const wb = XLSX.read(evt.target.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-        const imp = rows.slice(1).filter(r => r[0]).map((r, i) => ({
-          id: Date.now() + i,
+        const imp = rows.slice(1).filter(r => r[0]).map((r) => ({
           name: String(r[0] || ''),
           unit: String(r[1] || ''),
           price: parseFloat(r[2]) || 0,
           stock: parseFloat(r[3]) || 0,
         }));
-        if (imp.length) setProducts(imp);
+
+        if (!imp.length) return;
+
+        const savedProducts = await Promise.all(imp.map(product => productsAPI.create(product)));
+        setProducts(prev => [...prev, ...savedProducts]);
       } catch (err) {
         console.error('Error importing Excel:', err);
+        alert('Import failed. Please check your connection and Excel file.');
       }
     };
     reader.readAsBinaryString(file);
     e.target.value = '';
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
+    const updatedProduct = {
+      ...editProd,
+      price: parseFloat(editProd.price) || 0,
+      stock: parseFloat(editProd.stock) || 0,
+    };
+
+    try {
+      await productsAPI.update(updatedProduct.id, updatedProduct);
+    } catch (err) {
+      console.error('Error updating product:', err);
+      alert('Product update failed. Please check your connection.');
+      return;
+    }
+
     setProducts(prev => prev.map(p => 
-      p.id === editProd.id ? { ...editProd, price: parseFloat(editProd.price) || 0, stock: parseFloat(editProd.stock) || 0 } : p
+      p.id === updatedProduct.id ? updatedProduct : p
     ));
     setEditProd(null);
   };
 
-  const saveNewProd = () => {
+  const saveNewProd = async () => {
     if (!newProd.name) return;
-    setProducts(prev => [...prev, {
-      id: Date.now(),
+
+    const product = {
       name: newProd.name,
       unit: newProd.unit,
       price: parseFloat(newProd.price) || 0,
       stock: parseFloat(newProd.stock) || 0,
-    }]);
+    };
+
+    try {
+      const savedProduct = await productsAPI.create(product);
+      setProducts(prev => [...prev, savedProduct]);
+    } catch (err) {
+      console.error('Error creating product:', err);
+      alert('Product save failed. Please check your connection.');
+      return;
+    }
+
     setNewProd({ name: '', unit: '', price: '', stock: '' });
     setShowAddProd(false);
   };
 
-  const saveRestock = () => {
+  const saveRestock = async () => {
     const q = parseFloat(restockP.add) || 0;
+    const newStock = parseFloat((restockP.stock + q).toFixed(2));
+
+    try {
+      await productsAPI.updateStock(restockP.id, newStock);
+    } catch (err) {
+      console.error('Error restocking product:', err);
+      alert('Restock failed. Please check your connection.');
+      return;
+    }
+
     setProducts(prev => prev.map(p => 
-      p.id === restockP.id ? { ...p, stock: parseFloat((p.stock + q).toFixed(2)) } : p
+      p.id === restockP.id ? { ...p, stock: newStock } : p
     ));
     setRestockP(null);
+  };
+
+  const deleteProduct = async (id) => {
+    try {
+      await productsAPI.delete(id);
+      setProducts(prev => prev.filter(x => x.id !== id));
+    } catch (err) {
+      console.error('Error deleting product:', err);
+      alert('Delete failed. Please check your connection.');
+    }
   };
 
   return (
@@ -121,7 +170,7 @@ const ProductsScreen = ({ products, setProducts }) => {
                 }}>
                   <Ic n="edit" size={15} color={C.blue} />
                 </button>
-                <button onClick={() => setProducts(prev => prev.filter(x => x.id !== p.id))} style={{
+                <button onClick={() => deleteProduct(p.id)} style={{
                   background: C.redSoft, border: 'none', borderRadius: 8, padding: '7px 9px', cursor: 'pointer'
                 }}>
                   <Ic n="trash" size={15} color={C.red} />
