@@ -88,7 +88,6 @@ export default function App() {
     
     const now = new Date();
     const tx = {
-      id: customerId,
       items: cartItems.map(i => ({ ...i })),
       total: parseFloat(cartTotal.toFixed(2)),
       cash: cashReceived,
@@ -100,7 +99,8 @@ export default function App() {
 
     try {
       // Save to backend
-      await salesAPI.create(tx);
+      const savedSale = await salesAPI.create(tx);
+      const savedTx = { ...tx, id: savedSale.id, customerNo: customerId };
       
       // Update local products (stock will be updated on refresh)
       setProducts(prev => prev.map(p => {
@@ -109,18 +109,18 @@ export default function App() {
       }));
       
       // Update local sales state so new sales show immediately on reports/dashboard
-      setSales(prev => [...prev, tx]);
+      setSales(prev => [savedTx, ...prev]);
       
       setCustNo(n => n + 1);
       settingsAPI.set('custNo', customerId + 1);
+      setReceipt(savedTx);
+      setCart([]);
       
     } catch (err) {
       console.error('Error saving sale:', err);
-      // Still show receipt but warn user
+      alert('Checkout failed. Please check your connection. The transaction was not saved.');
+      return;
     }
-    
-    setReceipt(tx);
-    setCart([]);
   };
 
   // Filtered data counts
@@ -191,7 +191,7 @@ export default function App() {
           <div style={{ color: C.dim, fontSize: 11, fontWeight: 600 }}>Family Borela</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          {tab === 'pos' && <div style={{ color: C.muted, fontSize: 13, fontWeight: 700 }}>Customer <span style={{ color: C.accent }}>#{custNo}</span></div>}
+          {tab === 'pos' && <div style={{ color: C.muted, fontSize: 13, fontWeight: 700 }}>Customer <span style={{ color: C.accent }}>#{sales.length + 1}</span></div>}
           {tab === 'products' && <div style={{ color: C.muted, fontSize: 12 }}>{products.length} products</div>}
           {tab === 'expenses' && <div style={{ color: C.muted, fontSize: 12 }}>{expenses.length} entries</div>}
           {tab === 'report' && <div style={{ color: C.muted, fontSize: 12 }}>{filtSales.length} records</div>}
@@ -207,14 +207,14 @@ export default function App() {
             products={products}
             cart={cart}
             setCart={setCart}
-            custNo={custNo}
+            custNo={sales.length + 1}
             setCustNo={setCustNo}
             checkout={handleCheckout}
           />
         )}
         {tab === 'products' && <ProductsScreen products={products} setProducts={setProducts} />}
         {tab === 'expenses' && <ExpensesScreen expenses={expenses} setExpenses={setExpenses} />}
-        {tab === 'report' && <ReportScreen sales={sales} expenses={expenses} />}
+        {tab === 'report' && <ReportScreen sales={sales} setSales={setSales} expenses={expenses} refreshData={loadData} />}
       </div>
 
       {/* Bottom Navigation */}
@@ -285,7 +285,7 @@ export default function App() {
             <div style={{ textAlign: 'center', marginBottom: 16 }}>
               <div style={{ fontSize: 50 }}>✅</div>
               <div style={{ color: C.green, fontWeight: 900, fontSize: 20, marginTop: 8 }}>Sale Complete!</div>
-              <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>Customer #{receipt.id} · {receipt.time}</div>
+              <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>Customer #{receipt.customerNo || receipt.id} · {receipt.time}</div>
             </div>
             <div style={{ background: C.surface, borderRadius: 14, overflow: 'hidden', marginBottom: 14 }}>
               {receipt.items.map((item, i) => (

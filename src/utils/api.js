@@ -92,26 +92,17 @@ export const productsAPI = {
 // Sales API - with localStorage sync for offline sale capture
 export const salesAPI = {
   getAll: () => fetchAPI('/sales'),
-  create: async (sale) => {
-    try {
-      const result = await fetchAPI('/sales', {
-        method: 'POST',
-        body: JSON.stringify(sale),
-      });
-
-      const cached = getLocalData('sales');
-      const newSale = { ...sale, id: result.id || sale.id || Date.now() };
-      setLocalData('sales', [...cached, newSale]);
-
-      return { id: newSale.id };
-    } catch (err) {
-      console.log('Offline mode: saving sale to localStorage');
-      const cached = getLocalData('sales');
-      const newSale = { ...sale, id: sale.id || Date.now() };
-      setLocalData('sales', [...cached, newSale]);
-      return { id: newSale.id };
-    }
-  },
+  create: (sale) =>
+    fetchAPI('/sales', {
+      method: 'POST',
+      body: JSON.stringify(sale),
+    }),
+  update: (id, sale) =>
+    fetchAPI(`/sales/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(sale),
+    }),
+  delete: (id) => fetchAPI(`/sales/${id}`, { method: 'DELETE' }),
 };
 
 // Expenses API

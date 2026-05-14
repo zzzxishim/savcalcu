@@ -429,6 +429,65 @@ app.post('/api/sales', async (req, res) => {
   }
 });
 
+app.put('/api/sales/:id', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
+  try {
+    const { id } = req.params;
+    const { cash, change } = req.body;
+
+    await pool.query(
+      `
+        UPDATE sales
+        SET cash = $1,
+            change = $2
+        WHERE id = $3
+      `,
+      [Number(cash) || 0, Number(change) || 0, id]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/sales/:id', async (req, res) => {
+  if (!ensureDatabase(res)) return;
+
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    const { rows } = await client.query('SELECT items FROM sales WHERE id = $1', [id]);
+    if (!rows.length) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Sale not found.' });
+      return;
+    }
+
+    const items = typeof rows[0].items === 'string' ? JSON.parse(rows[0].items) : rows[0].items;
+    for (const item of items || []) {
+      await client.query('UPDATE products SET stock = stock + $1 WHERE id = $2', [
+        Number(item.qty) || 0,
+        item.id,
+      ]);
+    }
+
+    await client.query('DELETE FROM sales WHERE id = $1', [id]);
+    await client.query('COMMIT');
+
+    res.json({ success: true });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ==================== EXPENSES API ====================
 
 app.get('/api/expenses', async (req, res) => {

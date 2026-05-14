@@ -370,7 +370,7 @@ if (key === 'C') {
               Add Item →
             </Btn>
           ) : (
-            <Btn onClick={() => checkout(custNo, cart, cashVal)} disabled={!cart.length} bg={C.green} fg="#000" style={{ width: '100%' }}>
+            <Btn onClick={() => checkout(custNo, cart, cashVal)} disabled={!cart.length || !cashInput || cashVal < cartTotal} bg={C.green} fg="#000" style={{ width: '100%' }}>
               Checkout ₱{cartTotal.toFixed(2)}
             </Btn>
           )}
