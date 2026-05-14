@@ -432,23 +432,62 @@ app.post('/api/sales', async (req, res) => {
 app.put('/api/sales/:id', async (req, res) => {
   if (!ensureDatabase(res)) return;
 
+  const client = await pool.connect();
+
   try {
     const { id } = req.params;
-    const { cash, change } = req.body;
+    const { items, total, cash, change } = req.body;
 
-    await pool.query(
+    await client.query('BEGIN');
+
+    const { rows } = await client.query('SELECT items FROM sales WHERE id = $1', [id]);
+    if (!rows.length) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Sale not found.' });
+      return;
+    }
+
+    const oldItems = typeof rows[0].items === 'string' ? JSON.parse(rows[0].items) : rows[0].items;
+    const nextItems = Array.isArray(items) ? items : oldItems;
+    const nextTotal = total !== undefined
+      ? Number(total) || 0
+      : nextItems.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.qty) || 0), 0);
+    const nextCash = Number(cash) || 0;
+    const nextChange = change !== undefined ? Number(change) || 0 : nextCash - nextTotal;
+
+    for (const item of oldItems || []) {
+      await client.query('UPDATE products SET stock = stock + $1 WHERE id = $2', [
+        Number(item.qty) || 0,
+        item.id,
+      ]);
+    }
+
+    for (const item of nextItems || []) {
+      await client.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [
+        Number(item.qty) || 0,
+        item.id,
+      ]);
+    }
+
+    await client.query(
       `
         UPDATE sales
-        SET cash = $1,
-            change = $2
-        WHERE id = $3
+        SET items = $1,
+            total = $2,
+            cash = $3,
+            change = $4
+        WHERE id = $5
       `,
-      [Number(cash) || 0, Number(change) || 0, id]
+      [JSON.stringify(nextItems), nextTotal, nextCash, nextChange, id]
     );
 
+    await client.query('COMMIT');
     res.json({ success: true });
   } catch (error) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 });
 

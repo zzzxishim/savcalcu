@@ -12,7 +12,12 @@ const ReportScreen = ({ sales, setSales, expenses, refreshData }) => {
   const [editSale, setEditSale] = useState(null);
   const backupFileRef = useRef(null);
 
-  const filtSales = useMemo(() => filterByPeriod(sales, period, customDate), [sales, period, customDate]);
+  const filtSales = useMemo(
+    () => filterByPeriod(sales, period, customDate)
+      .slice()
+      .sort((a, b) => new Date(a.dateISO) - new Date(b.dateISO)),
+    [sales, period, customDate]
+  );
   const numberedSales = useMemo(
     () => filtSales.map((sale, index) => ({ ...sale, customerNo: index + 1 })),
     [filtSales]
@@ -113,15 +118,27 @@ const ReportScreen = ({ sales, setSales, expenses, refreshData }) => {
   };
 
   const saveSaleEdit = async () => {
+    const items = editSale.items
+      .map(item => ({
+        ...item,
+        price: parseFloat(item.price) || 0,
+        qty: parseFloat(item.qty) || 0,
+      }))
+      .filter(item => item.qty > 0);
+    const total = parseFloat(items.reduce((sum, item) => sum + item.price * item.qty, 0).toFixed(2));
     const cash = parseFloat(editSale.cash) || 0;
     const updatedSale = {
       ...editSale,
+      items,
+      total,
       cash,
-      change: parseFloat((cash - editSale.total).toFixed(2)),
+      change: parseFloat((cash - total).toFixed(2)),
     };
 
     try {
       await salesAPI.update(updatedSale.id, {
+        items: updatedSale.items,
+        total: updatedSale.total,
         cash: updatedSale.cash,
         change: updatedSale.change,
       });
@@ -131,6 +148,22 @@ const ReportScreen = ({ sales, setSales, expenses, refreshData }) => {
       console.error('Error editing transaction:', err);
       alert('Transaction edit failed. Please check your connection.');
     }
+  };
+
+  const updateEditItem = (index, field, value) => {
+    setEditSale(sale => ({
+      ...sale,
+      items: sale.items.map((item, itemIndex) => (
+        itemIndex === index ? { ...item, [field]: value } : item
+      )),
+    }));
+  };
+
+  const removeEditItem = (index) => {
+    setEditSale(sale => ({
+      ...sale,
+      items: sale.items.filter((_, itemIndex) => itemIndex !== index),
+    }));
   };
 
   return (
@@ -239,7 +272,15 @@ const ReportScreen = ({ sales, setSales, expenses, refreshData }) => {
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 10 }}>
-              <Btn onClick={() => setEditSale({ ...sale, cash: String(sale.cash) })} bg={C.blueSoft} fg={C.blue} sm>
+              <Btn onClick={() => setEditSale({
+                ...sale,
+                cash: String(sale.cash),
+                items: sale.items.map(item => ({
+                  ...item,
+                  price: String(item.price),
+                  qty: String(item.qty),
+                })),
+              })} bg={C.blueSoft} fg={C.blue} sm>
                 <Ic n="edit" size={14} color={C.blue} /> Edit
               </Btn>
               <Btn onClick={() => deleteSale(sale)} bg={C.redSoft} fg={C.red} sm>
@@ -276,7 +317,45 @@ const ReportScreen = ({ sales, setSales, expenses, refreshData }) => {
 
       {editSale && (
         <Modal title={`Edit Customer #${editSale.customerNo}`} onClose={() => setEditSale(null)}>
-          <Field label="TOTAL" value={`PHP ${editSale.total.toFixed(2)}`} onChange={() => {}} />
+          <div style={{ color: C.muted, fontSize: 11, fontWeight: 700, marginBottom: 8 }}>ITEMS</div>
+          {editSale.items.map((item, index) => (
+            <div key={`${item.id}-${index}`} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 10, marginBottom: 10 }}>
+              <div style={{ color: C.text, fontWeight: 800, fontSize: 13, marginBottom: 8 }}>{item.name}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, alignItems: 'end' }}>
+                <Field
+                  label="QTY"
+                  type="number"
+                  step="0.01"
+                  value={item.qty}
+                  onChange={value => updateEditItem(index, 'qty', value)}
+                />
+                <Field
+                  label="PRICE"
+                  type="number"
+                  step="0.01"
+                  value={item.price}
+                  onChange={value => updateEditItem(index, 'price', value)}
+                />
+                <button onClick={() => removeEditItem(index)} style={{
+                  background: C.redSoft,
+                  color: C.red,
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '11px 12px',
+                  marginBottom: 12,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}>
+                  Del
+                </button>
+              </div>
+            </div>
+          ))}
+          <Field
+            label="TOTAL"
+            value={`PHP ${editSale.items.reduce((sum, item) => sum + (parseFloat(item.price) || 0) * (parseFloat(item.qty) || 0), 0).toFixed(2)}`}
+            onChange={() => {}}
+          />
           <Field
             label="CASH RECEIVED"
             type="number"
@@ -285,7 +364,7 @@ const ReportScreen = ({ sales, setSales, expenses, refreshData }) => {
             onChange={v => setEditSale(s => ({ ...s, cash: v }))}
           />
           <div style={{ color: C.muted, fontSize: 13, marginBottom: 12 }}>
-            Change: <strong style={{ color: C.green }}>PHP {((parseFloat(editSale.cash) || 0) - editSale.total).toFixed(2)}</strong>
+            Change: <strong style={{ color: C.green }}>PHP {((parseFloat(editSale.cash) || 0) - editSale.items.reduce((sum, item) => sum + (parseFloat(item.price) || 0) * (parseFloat(item.qty) || 0), 0)).toFixed(2)}</strong>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn onClick={() => setEditSale(null)} bg={C.dim} fg={C.text} style={{ flex: 1 }}>Cancel</Btn>
